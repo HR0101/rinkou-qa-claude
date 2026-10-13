@@ -1,7 +1,7 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "rinkou-qa",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "輪講・ゼミ発表の準備ノート（自分の発表原稿・課題原稿，ほかの人の回の解説・質問と逆質問，回のメモ）を作り，想定質問を最優先の表・難易度別の索引・分類別の全問の型で「できる限り詰めて」まとめるスキル．",
   "author": {
     "name": "HR0101",
