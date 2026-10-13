@@ -7,13 +7,13 @@
   },
   "metadata": {
     "description": "輪講・ゼミ発表の準備ノートと想定質問を作るClaude Code用スキル",
-    "version": "1.1.0"
+    "version": "1.1.1"
   },
   "plugins": [
     {
       "name": "rinkou-qa",
       "source": "./",
-      "version": "1.1.0",
+      "version": "1.1.1",
       "description": "自分の発表原稿・課題原稿，ほかの人の回の解説・質問と逆質問，回のメモを同じ型で作り，元データから想定質問の節を組み立て，資料の式・図がすべて解説にあるかを調べる．",
       "author": {
         "name": "HR0101"
