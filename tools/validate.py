@@ -9,8 +9,10 @@
 - スキル名がディレクトリ名と一致すること
 - SKILL.md から参照される相対パスのファイルが実在すること
 - 同梱スクリプトに実行権限があり，構文エラーがないこと
-- build_qa.py が同梱の実例から全問を組み立てられ，ノートの節の外を変えず，
-  書式の誤りではエラーで止まること
+- build_qa.py が同梱の実例とひな形から全問を組み立てられ，ノートの節の外を
+  変えず，書式の誤りではエラーで止まること
+- check_coverage.py が見出しにない式・図を見つけ，すべてあれば成功すること
+- スキル内のすべての Markdown から張った相対リンクの先が実在すること
 
 使い方:
     python3 tools/validate.py
@@ -33,6 +35,8 @@ ROOT = Path(__file__).resolve().parent.parent
 # build_qa.py の検査に使う値
 BUILD_SCRIPT = ROOT / "skills" / "rinkou-qa" / "scripts" / "build_qa.py"
 EXAMPLES_DIR = ROOT / "skills" / "rinkou-qa" / "examples"
+TEMPLATES_DIR = ROOT / "skills" / "rinkou-qa" / "templates"
+COVERAGE_SCRIPT = ROOT / "skills" / "rinkou-qa" / "scripts" / "check_coverage.py"
 FIXED_DATE = "2000-01-01"
 QUESTION_LINE = re.compile(r"^@\d+\|", re.M)
 BUILT_QUESTION_LINE = re.compile(r"^\*\*[A-Z]+\d+．", re.M)
@@ -157,11 +161,12 @@ def checkSkills() -> None:
     description = fields.get("description", "")
     if len(description) > 1024:
       warn(f"{skillFile.relative_to(ROOT)} の description が長い（{len(description)}文字）")
-    checkSkillLinks(skillFile)
+    for markdownFile in sorted(skillDir.rglob("*.md")):
+      checkSkillLinks(markdownFile)
 
 
 def checkSkillLinks(skillFile: Path) -> None:
-  """SKILL.md 内の相対リンクと参照パスの実在を確認する．"""
+  """スキル内の Markdown の相対リンクと参照パスの実在を確認する．"""
   text = skillFile.read_text(encoding="utf-8")
   base = skillFile.parent
   # Markdownリンクと，コードブロック内の scripts/... 形式の呼び出しを拾う
@@ -205,8 +210,8 @@ def runBuild(*args: str) -> subprocess.CompletedProcess:
 
 
 def checkExamples() -> None:
-  """同梱の実例から，元データの全問が節に組み立てられることを確認する．"""
-  examples = sorted(EXAMPLES_DIR.glob("*.txt"))
+  """同梱の実例とひな形から，元データの全問が節に組み立てられることを確認する．"""
+  examples = sorted(EXAMPLES_DIR.glob("*.txt")) + sorted(TEMPLATES_DIR.glob("*_source.txt"))
   if not examples:
     warn("examples/ に元データの実例がない")
   for example in examples:
@@ -266,6 +271,36 @@ def checkBuildScript() -> None:
     checkBrokenSources(Path(tmp))
 
 
+def runCoverage(sourceText: str, noteText: str, tmp: Path, *extra: str) -> int:
+  """取り出し済みのテキストとノートで check_coverage.py を実行し，終了コードを返す．"""
+  source = tmp / "source.txt"
+  note = tmp / "coverage_note.md"
+  source.write_text(sourceText, encoding="utf-8")
+  note.write_text(noteText, encoding="utf-8")
+  result = subprocess.run(
+    [sys.executable, "-I", str(COVERAGE_SCRIPT), "--text", str(source), str(note), *extra],
+    capture_output=True, text=True,
+  )
+  return result.returncode
+
+
+def checkCoverageScript() -> None:
+  """資料の式・図が見出しにあるかを調べるスクリプトの動作を確認する．"""
+  if not COVERAGE_SCRIPT.exists():
+    fail(f"{COVERAGE_SCRIPT.relative_to(ROOT)} が存在しない")
+    return
+  sourceText = "式 (1.47a) と (1.55) を使う．図 1.15 に示す．\n"
+  fullNote = "#### 式(1.47)　畳み込み\n#### 式(1.54)–(1.57)　歪みのない伝送\n### 図1.15　スペクトル\n"
+  missingFigure = "#### 式(1.47)　畳み込み\n#### 式(1.54)–(1.57)　歪みのない伝送\n本文に 図1.15 とだけ書く\n"
+  with tempfile.TemporaryDirectory() as tmp:
+    if runCoverage(sourceText, fullNote, Path(tmp)) != 0:
+      fail("check_coverage.py が，すべて見出しにあるのに失敗している（枝番・範囲の扱い）")
+    if runCoverage(sourceText, missingFigure, Path(tmp)) != 1:
+      fail("check_coverage.py が，見出しにない図を見つけられていない")
+    if runCoverage(sourceText, missingFigure, Path(tmp), "--ignore", "図1.15") != 0:
+      fail("check_coverage.py の --ignore が効いていない")
+
+
 def main() -> int:
   """すべての検証を実行し，結果を表示する．"""
   pluginName = checkPluginManifest()
@@ -273,6 +308,7 @@ def main() -> int:
   checkSkills()
   checkScripts()
   checkBuildScript()
+  checkCoverageScript()
 
   for message in warnings:
     print(f"警告: {message}")
