@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "rinkou-qa",
+  "version": "1.0.0",
+  "description": "輪講・ゼミ発表の発表原稿や課題原稿に，想定質問と答えを最優先の表・難易度別の索引・分類別の全問の型で「できる限り詰めて」作るスキル．",
+  "author": {
+    "name": "HR0101",
+    "url": "https://github.com/HR0101"
+  },
+  "homepage": "https://github.com/HR0101/rinkou-qa-claude",
+  "repository": "https://github.com/HR0101/rinkou-qa-claude",
+  "license": "MIT",
+  "keywords": [
+    "japanese",
+    "seminar",
+    "presentation",
+    "qa",
+    "markdown",
+    "agent-skills"
+  ]
+}

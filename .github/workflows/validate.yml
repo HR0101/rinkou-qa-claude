@@ -1,0 +1,30 @@
+name: validate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  validate:
+    name: プラグイン定義とスキルの検証
+    runs-on: ubuntu-latest
+    steps:
+      - name: リポジトリを取得する
+        uses: actions/checkout@v4
+
+      - name: Pythonを準備する
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: プラグイン定義・スキル・build_qa.py を検証する
+        run: python3 tools/validate.py
+
+      - name: 引数なしの build_qa.py が使い方を表示して失敗することを確認する
+        run: |
+          if skills/rinkou-qa/scripts/build_qa.py; then
+            echo "引数なしでも成功終了している．使い方を表示して失敗すべき" >&2
+            exit 1
+          fi

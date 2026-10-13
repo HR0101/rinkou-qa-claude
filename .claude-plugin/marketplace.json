@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "rinkou-qa-claude",
+  "owner": {
+    "name": "HR0101",
+    "url": "https://github.com/HR0101"
+  },
+  "metadata": {
+    "description": "輪講・ゼミ発表の想定質問をできる限り詰めて作るClaude Code用スキル",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "rinkou-qa",
+      "source": "./",
+      "version": "1.0.0",
+      "description": "発表原稿や課題原稿の「## 想定質問」節に，最優先の表・難易度別の索引・分類別の全問・一問一答・詰まったときの返し方を備えた想定質問を作り，元データから節を組み立てる．",
+      "author": {
+        "name": "HR0101"
+      },
+      "homepage": "https://github.com/HR0101/rinkou-qa-claude",
+      "license": "MIT",
+      "category": "productivity",
+      "keywords": [
+        "japanese",
+        "seminar",
+        "presentation",
+        "qa"
+      ]
+    }
+  ]
+}

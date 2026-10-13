@@ -1,0 +1,8 @@
+# 配布物の改行コードをLFへ固定する（Windowsでcloneしてもスクリプトが壊れないようにする）
+* text=auto eol=lf
+
+*.sh text eol=lf
+*.py text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.yml text eol=lf
