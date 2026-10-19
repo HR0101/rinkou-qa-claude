@@ -12,6 +12,8 @@
 - build_qa.py が同梱の実例とひな形から全問を組み立てられ，ノートの節の外を
   変えず，書式の誤りではエラーで止まること
 - check_coverage.py が見出しにない式・図を見つけ，すべてあれば成功すること
+- check_coverage.py の --qa が問数の不足を見つけ（元データと番号付きの質問の両方），
+  目安に届けば成功し，--sentences が資料の文を番号付きで書き出すこと
 - スキル内のすべての Markdown から張った相対リンクの先が実在すること
 
 使い方:
@@ -271,17 +273,21 @@ def checkBuildScript() -> None:
     checkBrokenSources(Path(tmp))
 
 
-def runCoverage(sourceText: str, noteText: str, tmp: Path, *extra: str) -> int:
-  """取り出し済みのテキストとノートで check_coverage.py を実行し，終了コードを返す．"""
+def runCoverageProcess(sourceText: str, noteText: str, tmp: Path, *extra: str) -> subprocess.CompletedProcess:
+  """取り出し済みのテキストとノートで check_coverage.py を実行する．"""
   source = tmp / "source.txt"
   note = tmp / "coverage_note.md"
   source.write_text(sourceText, encoding="utf-8")
   note.write_text(noteText, encoding="utf-8")
-  result = subprocess.run(
+  return subprocess.run(
     [sys.executable, "-I", str(COVERAGE_SCRIPT), "--text", str(source), str(note), *extra],
     capture_output=True, text=True,
   )
-  return result.returncode
+
+
+def runCoverage(sourceText: str, noteText: str, tmp: Path, *extra: str) -> int:
+  """check_coverage.py を実行し，終了コードを返す．"""
+  return runCoverageProcess(sourceText, noteText, tmp, *extra).returncode
 
 
 def checkCoverageScript() -> None:
@@ -299,6 +305,37 @@ def checkCoverageScript() -> None:
       fail("check_coverage.py が，見出しにない図を見つけられていない")
     if runCoverage(sourceText, missingFigure, Path(tmp), "--ignore", "図1.15") != 0:
       fail("check_coverage.py の --ignore が効いていない")
+    checkQuestionCounts(Path(tmp), sourceText, fullNote)
+
+
+def checkQuestionCounts(tmp: Path, sourceText: str, fullNote: str) -> None:
+  """--qa が問数の不足を見つけ，目安に届けば成功し，--sentences が文を書き出すことを確認する．"""
+  twoPages = sourceText + "\f2ページ目の文です．式 (1.55) をもう一度使う．\n"
+  fewSource = tmp / "few.txt"
+  fewSource.write_text("# A|分類\n@1|-||式(1.55)は何ですか．\n答え．\n", encoding="utf-8")
+  enoughSource = tmp / "enough.txt"
+  enoughSource.write_text(
+    "# A|分類\n@1|-||式(1.55)は何ですか．\n答え．\n@1|-||図1.15は何ですか．\n答え．\n"
+    "@1|-||式(1.47a)は何ですか．\n答え．\n@1|-||ほかの質問．\n答え．\n%tail\n式(1.55)の説明は数えない．\n",
+    encoding="utf-8",
+  )
+  small = ("--min-per-page", "2", "--min-per-equation", "1", "--min-per-figure", "1")
+  if runCoverage(twoPages, fullNote, tmp, "--qa", str(fewSource), *small) != 1:
+    fail("check_coverage.py の --qa が，問数の不足を見つけられていない")
+  if runCoverage(twoPages, fullNote, tmp, "--qa", str(enoughSource), *small) != 0:
+    fail("check_coverage.py の --qa が，目安に届いているのに失敗している")
+  numbered = tmp / "numbered.md"
+  numbered.write_text(
+    "## 6. 質問\n\n### 6-1. 節\n\n1. 【式(1.55)】質問．\n   - → 答え．\n2. 【図1.15】質問．\n"
+    "3. 【式(1.47a)】質問．\n4. 質問．\n\n## 使い分け\n\n1. 数えない．\n",
+    encoding="utf-8",
+  )
+  result = runCoverageProcess(twoPages, fullNote, tmp, "--qa", str(numbered), *small)
+  if result.returncode != 0 or "全4問" not in result.stdout:
+    fail("check_coverage.py の --qa が，番号付きの質問（質問の節だけ）を正しく数えていない")
+  sentences = runCoverageProcess(twoPages, fullNote, tmp, "--sentences")
+  if sentences.returncode != 0 or "p.2-01" not in sentences.stdout:
+    fail("check_coverage.py の --sentences が，ページごとの文を書き出していない")
 
 
 def main() -> int:
