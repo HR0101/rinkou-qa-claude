@@ -20,6 +20,7 @@
 - check_coverage.py の --min-open-share が，答えが「はい」で始まる質問ばかりのときに
   説明してもらう質問の不足を見つけること
 - check_coverage.py の --sentences が，手順の文と理由が書かれていない文に印を付けること
+- check_coverage.py の --min-deep-per-page が，考えて答える質問（〔組み合わせ〕などの印）の不足を見つけること
 - スキル内のすべての Markdown から張った相対リンクの先が実在すること
 
 使い方:
@@ -418,6 +419,18 @@ def checkAnswerKinds(tmp: Path, sourceText: str, fullNote: str, small: tuple[str
     fail("check_coverage.py が，「はい」で答える質問と説明してもらう質問を正しく数えていない")
   if runCoverage(sourceText, fullNote, tmp, "--qa", str(answers), *small, "--min-open-share", "0.6") != 1:
     fail("check_coverage.py の --min-open-share が，説明してもらう質問の不足を見つけていない")
+  deep = tmp / "deep.md"
+  deep.write_text(
+    "## 6. 質問\n\n1. 〔もし〕【式(1.55)】〜を変えるとどうなりますか．\n   - → 〜．\n"
+    "2. 〔組み合わせ〕【図1.15】〜のとき〜はどうなりますか．\n   - → 〜．\n"
+    "3. 【式(1.47a)】〇〇とは何ですか．\n   - → 〜のこと．\n4. 〔理由なし〕は印ではない．\n   - → 〜．\n",
+    encoding="utf-8",
+  )
+  result = runCoverageProcess(sourceText, fullNote, tmp, "--qa", str(deep), *small, "--min-deep-per-page", "1")
+  if result.returncode != 0 or "：2問" not in result.stdout:
+    fail("check_coverage.py が，考えて答える質問（印付き）を正しく数えていない")
+  if runCoverage(sourceText, fullNote, tmp, "--qa", str(deep), *small, "--min-deep-per-page", "2") != 1:
+    fail("check_coverage.py の --min-deep-per-page が，考えて答える質問の不足を見つけていない")
 
 
 def main() -> int:
