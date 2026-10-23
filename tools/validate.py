@@ -21,6 +21,7 @@
   説明してもらう質問の不足を見つけること
 - check_coverage.py の --sentences が，手順の文と理由が書かれていない文に印を付けること
 - check_coverage.py の --min-deep-per-page が，考えて答える質問（〔組み合わせ〕などの印）の不足を見つけること
+- check_coverage.py の --require-intent が，「意図：」「言い換え：」の行が欠けた質問を見つけること
 - スキル内のすべての Markdown から張った相対リンクの先が実在すること
 
 使い方:
@@ -431,6 +432,19 @@ def checkAnswerKinds(tmp: Path, sourceText: str, fullNote: str, small: tuple[str
     fail("check_coverage.py が，考えて答える質問（印付き）を正しく数えていない")
   if runCoverage(sourceText, fullNote, tmp, "--qa", str(deep), *small, "--min-deep-per-page", "2") != 1:
     fail("check_coverage.py の --min-deep-per-page が，考えて答える質問の不足を見つけていない")
+  intents = tmp / "intents.md"
+  complete = (
+    "## 6. 質問\n\n1. 【式(1.55)】〜はどうなりますか．\n   - → 〜．\n   - 意図：〜を確かめたい．\n   - 言い換え：〜という意味です．\n"
+    "2. 【図1.15】〜は何ですか．\n   - → 〜．\n   - 意図：〜が気になった．\n   - 言い換え：〜という意味です．\n"
+    "3. 【式(1.47a)】〜ですか．\n   - → 〜．\n   - 意図：〜．\n   - 言い換え：〜．\n\n## 7. 表記・文体の指摘\n\n4. 指摘．\n"
+  )
+  intents.write_text(complete, encoding="utf-8")
+  if runCoverage(sourceText, fullNote, tmp, "--qa", str(intents), *small, "--require-intent") != 0:
+    fail("check_coverage.py の --require-intent が，意図と言い換えがそろっているのに失敗している")
+  intents.write_text(complete.replace("   - 言い換え：〜という意味です．\n2.", "\n2."), encoding="utf-8")
+  result = runCoverageProcess(sourceText, fullNote, tmp, "--qa", str(intents), *small, "--require-intent")
+  if result.returncode != 1 or "欠けている番号：1．" not in result.stdout:
+    fail("check_coverage.py の --require-intent が，言い換えの欠けた質問を見つけていない")
 
 
 def main() -> int:

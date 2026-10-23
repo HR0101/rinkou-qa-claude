@@ -4,7 +4,8 @@
 「式の解説」「図の解説」に，資料のすべての式と図を並べたかを確かめるために使う．
 --qa を付けると，想定質問・逆質問・発表者への質問が，資料のページ数と式・図の数に
 見合うだけあるか（問数の目安）と，難易度（レベル1〜5）の配分，答えが「はい」で終わる質問と
-答えを説明してもらう質問の割合，資料を見ただけでは答えが出ない「考えて答える質問」の数も調べる．
+答えを説明してもらう質問の割合，資料を見ただけでは答えが出ない「考えて答える質問」の数，
+発表者への質問に「意図：」「言い換え：」の行がそろっているか（--require-intent）も調べる．
 --sentences は資料の文を番号付きで書き出し，手順の文と理由が書かれていない文に印を付ける．
 
 使い方:
@@ -12,7 +13,7 @@
   python3 check_coverage.py 資料.pdf ノート.md --ignore 1.38 --ignore 図1.2
   python3 check_coverage.py --text 資料.txt ノート.md     （テキストを取り出し済みのとき）
   python3 check_coverage.py 資料.pdf ノート.md --qa 元データ.txt
-  python3 check_coverage.py 資料.pdf ノート.md --qa 解説・質問.md --min-per-page 15 --min-per-equation 2 --min-per-figure 2 --min-easy-share 0.2 --min-open-share 0.4 --min-deep-per-page 5
+  python3 check_coverage.py 資料.pdf ノート.md --qa 解説・質問.md --min-per-page 15 --min-per-equation 2 --min-per-figure 2 --min-easy-share 0.2 --min-open-share 0.4 --min-deep-per-page 5 --require-intent
   python3 check_coverage.py 資料.pdf ノート.md --sentences
 
 PDF のテキストは pdftotext（Poppler）で取り出す．
@@ -52,6 +53,9 @@ YES_ANSWER = re.compile(r"^(はい|ええ|そうです)")
 # 考えて答える質問の印（質問の頭に付ける）と，1ページあたりの数の下限（既定は調べない）
 DEEP_TAG = re.compile(r"〔(組み合わせ|もし|比較|数値|つながり|理由|限界|前提)〕")
 DEFAULT_MIN_DEEP_PER_PAGE = 0
+# 発表者への質問で，聞き返されたときに言う「意図」と「言い換え」の行
+INTENT_LINE = re.compile(r"^\s*-\s*意図[：:]")
+REPHRASE_LINE = re.compile(r"^\s*-\s*言い換え[：:]")
 # 解説・質問ファイルの想定回答の行（   - → 答え）
 ARROW_ANSWER = re.compile(r"^\s*-\s*→\s*(.*)$")
 # 質問のまとまりの始まり（元データの @行，組み立てた節の **A1．，番号付きの質問）
@@ -276,6 +280,28 @@ def reportDeepQuestions(args, blocks, pages):
   return 0
 
 
+def reportIntents(blocks):
+  """番号付きの質問（想定回答「→」のあるもの）に，「意図：」と「言い換え：」の行があるかを調べ，欠けた数を返す．"""
+  asked = [
+    block for block in blocks
+    if NUMBERED_QUESTION.match(block["text"]) and any(ARROW_ANSWER.match(line) for line in block["text"].split("\n")[1:])
+  ]
+  if not asked:
+    print("意図と言い換え：調べていません（解説・質問ファイルの番号付きの質問だけを調べます）")
+    return 0
+  missing = []
+  for block in asked:
+    lines = block["text"].split("\n")
+    if not any(INTENT_LINE.match(line) for line in lines) or not any(REPHRASE_LINE.match(line) for line in lines):
+      missing.append(block["text"].split(".", 1)[0])
+  print(f"意図と言い換え：{len(asked)}問のうち，そろっていない質問 {len(missing)}問")
+  if missing:
+    shown = "，".join(missing[:15]) + ("，…" if len(missing) > 15 else "")
+    print(f"  欠けている番号：{shown}．聞き返されたときのために「- 意図：」「- 言い換え：」の行を足してください")
+    return 1
+  return 0
+
+
 def loadQuestionBlocks(path):
   """元データ（.txt）かノート（.md）から，質問ごとのテキストとレベル，難易度の段階数を取り出す．"""
   lines = path.read_text(encoding="utf-8").splitlines()
@@ -351,8 +377,10 @@ def reportQuestionCounts(args, sourceText, inSource, ignored):
   shortage += reportLevels(args, blocks, max(scales) if scales else None)
   shortage += reportAnswerKinds(args, blocks)
   shortage += reportDeepQuestions(args, blocks, pages)
+  if args.require_intent:
+    shortage += reportIntents(blocks)
   if shortage:
-    print("\n問数が目安に届いていません．言い換えではなく，触れていない文・式・図・記号・数値と，足りないレベルの問いを足してください")
+    print("\n問数が目安に届いていません．言い換えではなく，触れていない文・式・図・記号・数値と，足りないレベルの問い，欠けている意図と言い換えを足してください")
   else:
     print("\n問数は目安に届いています")
   return shortage
@@ -405,6 +433,7 @@ def parseArgs():
   parser.add_argument("--min-easy-share", type=float, default=DEFAULT_MIN_EASY_SHARE, help=f"5段階のとき，レベル1〜2が全問に占める割合の下限（既定 {DEFAULT_MIN_EASY_SHARE}．発表者への質問は 0.4）")
   parser.add_argument("--min-open-share", type=float, default=DEFAULT_MIN_OPEN_SHARE, help=f"答えが「はい」で始まらない（説明してもらう）質問の割合の下限（既定 {DEFAULT_MIN_OPEN_SHARE}．発表者への質問は 0.4）")
   parser.add_argument("--min-deep-per-page", type=int, default=DEFAULT_MIN_DEEP_PER_PAGE, help=f"考えて答える質問（〔組み合わせ〕などの印付き）の1ページあたりの下限（既定 {DEFAULT_MIN_DEEP_PER_PAGE}．逆質問と発表者への質問は 5）")
+  parser.add_argument("--require-intent", action="store_true", help="発表者への質問（番号付き）に「- 意図：」「- 言い換え：」の行がそろっているかを調べる")
   parser.add_argument("--sentences", action="store_true", help="資料の文をページごとに番号付きで書き出して終わる")
   args = parser.parse_args()
   for name in ("pages", "min_per_page", "min_per_equation", "min_per_figure", "min_deep_per_page"):
