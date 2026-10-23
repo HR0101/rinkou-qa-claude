@@ -3,18 +3,19 @@
 
 「式の解説」「図の解説」に，資料のすべての式と図を並べたかを確かめるために使う．
 --qa を付けると，想定質問・逆質問・発表者への質問が，資料のページ数と式・図の数に
-見合うだけあるか（問数の目安）も調べる．--sentences は資料の文を番号付きで書き出す．
+見合うだけあるか（問数の目安）と，難易度（レベル1〜5）の配分も調べる．
+--sentences は資料の文を番号付きで書き出す．
 
 使い方:
   python3 check_coverage.py 資料.pdf ノート.md
   python3 check_coverage.py 資料.pdf ノート.md --ignore 1.38 --ignore 図1.2
   python3 check_coverage.py --text 資料.txt ノート.md     （テキストを取り出し済みのとき）
   python3 check_coverage.py 資料.pdf ノート.md --qa 元データ.txt
-  python3 check_coverage.py 資料.pdf ノート.md --qa 解説・質問.md --min-per-page 5 --min-per-equation 1 --min-per-figure 1
+  python3 check_coverage.py 資料.pdf ノート.md --qa 解説・質問.md --min-per-page 15 --min-per-equation 2 --min-per-figure 2 --min-easy-share 0.4
   python3 check_coverage.py 資料.pdf ノート.md --sentences
 
 PDF のテキストは pdftotext（Poppler）で取り出す．
-見出しにない番号があるか，--qa の問数が目安に届かなければ，一覧を出して終了コード1で終わる．
+見出しにない番号があるか，--qa の問数やレベルの配分が目安に届かなければ，一覧を出して終了コード1で終わる．
 """
 import argparse
 import re
@@ -35,12 +36,20 @@ PREFIXES = {"式": "", "図": "図", "表": "表"}
 MAX_RANGE_LENGTH = 30
 BRANCH_LETTERS = "abcdefghijklmnopqrstuvwxyz"
 
-# 問数の目安（逆質問・想定質問の既定値．発表者への質問では --min-per-page などで下げる）
-DEFAULT_MIN_PER_PAGE = 25
-DEFAULT_MIN_PER_EQUATION = 5
-DEFAULT_MIN_PER_FIGURE = 6
+# 問数の目安（逆質問の既定値．発表原稿や発表者への質問では --min-per-page などで変える）
+DEFAULT_MIN_PER_PAGE = 35
+DEFAULT_MIN_PER_EQUATION = 7
+DEFAULT_MIN_PER_FIGURE = 8
+# 難易度を5段階に分けたとき，各レベルが全問に占める割合の下限と，レベル1〜2の割合の下限（既定は調べない）
+FIVE_LEVELS = 5
+EASY_LEVELS = (1, 2)
+DEFAULT_MIN_LEVEL_SHARE = 0.1
+DEFAULT_MIN_EASY_SHARE = 0.0
 # 質問のまとまりの始まり（元データの @行，組み立てた節の **A1．，番号付きの質問）
-SOURCE_QUESTION = re.compile(r"^@\d+\|")
+SOURCE_QUESTION = re.compile(r"^@(\d+)\|")
+# 元データの難易度の段階数（%levels 5）と，ノートの小見出しのレベル（### 6-1. レベル1（…））
+SOURCE_LEVELS = re.compile(r"^%levels\s+(\d+)$")
+LEVEL_HEADING = re.compile(r"レベル([1-9])")
 BUILT_QUESTION = re.compile(r"^\*\*[A-Z]+\d+．")
 NUMBERED_QUESTION = re.compile(r"^\d+\.\s")
 BLOCK_END = re.compile(r"^(#{1,6}\s|# |%)")
@@ -146,53 +155,70 @@ def countPages(sourceText):
 
 
 def splitSourceBlocks(lines):
-  """元データ（@行で始まる質問）を，質問ごとのテキストに分ける．
+  """元データ（@行で始まる質問）を，質問ごとのテキストとレベルに分け，難易度の段階数と一緒に返す．
 
   分類の行（# ）や自由記述のブロック（%head など）が来たら，次の質問まで数えない．
+  段階数は %levels の値で，書かれていなければ3（1.2.0 までの元データ）．
   """
   blocks = []
+  scale = 3
   active = False
   for line in lines:
-    if SOURCE_QUESTION.match(line):
-      blocks.append(line)
+    question = SOURCE_QUESTION.match(line)
+    levels = SOURCE_LEVELS.match(line)
+    if levels:
+      scale = int(levels.group(1))
+    if question:
+      blocks.append({"text": line, "level": int(question.group(1))})
       active = True
     elif BLOCK_END.match(line):
       active = False
     elif active and line.strip():
-      blocks[-1] += "\n" + line
-  return blocks
+      blocks[-1]["text"] += "\n" + line
+  return blocks, scale
 
 
 def splitNoteBlocks(lines):
-  """Markdown のノートを質問ごとのテキストに分ける．
+  """Markdown のノートを質問ごとのテキストとレベルに分け，難易度の段階数と一緒に返す．
 
   組み立てた節（**A1．）があればそれを，なければ見出し2（## ）に「質問」「指摘」を含む節の
   番号付きの項目（1. 2. …）を，1問として数える．小見出し（### 6-1 など）の下も同じ節とみなす．
+  番号付きの項目のレベルは，その上の小見出しの「レベルN」から読む（### 6-1. レベル1（…））．
+  小見出しにレベルがあれば5段階とみなし，なければ段階数は None（レベルを調べない）．
   """
-  if any(BUILT_QUESTION.match(line) for line in lines):
+  built = any(BUILT_QUESTION.match(line) for line in lines)
+  if built:
     starter, inSection = BUILT_QUESTION, (lambda heading: True)
   else:
     starter = NUMBERED_QUESTION
     inSection = lambda heading: any(word in heading for word in QUESTION_SECTION_WORDS)
   blocks = []
   section = ""
+  level = None
+  scale = None
   current = None
   for line in lines:
     if HEADING_PATTERN.match(line):
       if line.startswith("## ") or line.startswith("# "):
         section = line
+        level = None
+      else:
+        match = LEVEL_HEADING.search(line)
+        level = int(match.group(1)) if match and not built and inSection(section) else None
+        if level is not None:
+          scale = FIVE_LEVELS
       current = None
       continue
     if starter.match(line) and inSection(section):
-      blocks.append(line)
+      blocks.append({"text": line, "level": level})
       current = len(blocks) - 1
     elif current is not None and line.strip():
-      blocks[current] += "\n" + line
-  return blocks
+      blocks[current]["text"] += "\n" + line
+  return blocks, scale
 
 
 def loadQuestionBlocks(path):
-  """元データ（.txt）かノート（.md）から，質問ごとのテキストを取り出す．"""
+  """元データ（.txt）かノート（.md）から，質問ごとのテキストとレベル，難易度の段階数を取り出す．"""
   lines = path.read_text(encoding="utf-8").splitlines()
   if any(SOURCE_QUESTION.match(line) for line in lines):
     return splitSourceBlocks(lines)
@@ -203,18 +229,48 @@ def countMentions(kind, numbers, blocks):
   """式・図の番号ごとに，その番号に触れている質問の数を数える．"""
   counts = {number: 0 for number in numbers}
   for block in blocks:
-    found = findNumbers(block, expand=True)[kind]
+    found = findNumbers(block["text"], expand=True)[kind]
     for number in numbers:
       if isCovered(kind, number, found):
         counts[number] += 1
   return counts
 
 
+def reportLevels(args, blocks, scale):
+  """質問のレベルの配分を表示し，5段階なら目安に届かないレベルの数を返す．"""
+  leveled = [block["level"] for block in blocks if block["level"] is not None]
+  if scale is None or not leveled:
+    print("レベル：調べていません（元データの @レベル か，ノートの小見出しの「レベルN」から読みます）")
+    return 0
+  counts = {level: leveled.count(level) for level in range(1, max(scale, max(leveled)) + 1)}
+  unleveled = len(blocks) - len(leveled)
+  parts = [f"レベル{level} {count}問" for level, count in counts.items()]
+  if unleveled:
+    parts.append(f"レベルなし {unleveled}問（表記の指摘など）")
+  print("レベル：" + "，".join(parts))
+  if scale < FIVE_LEVELS:
+    return 0
+  shortage = 0
+  few = [level for level in range(1, FIVE_LEVELS + 1) if counts.get(level, 0) < args.min_level_share * len(leveled)]
+  if few:
+    print(f"  全問の{args.min_level_share:.0%}に届かないレベル：" + "，".join(f"レベル{level}" for level in few))
+    shortage += len(few)
+  easy = sum(counts.get(level, 0) for level in EASY_LEVELS)
+  if easy < args.min_easy_share * len(leveled):
+    print(f"  レベル1〜2が{easy}問で，全問の{args.min_easy_share:.0%}に届きません．聞きやすい易しい質問を足してください")
+    shortage += 1
+  return shortage
+
+
 def reportQuestionCounts(args, sourceText, inSource, ignored):
   """--qa のファイルの問数が，ページ数と式・図の数に見合うかを表示し，不足の数を返す．"""
   blocks = []
+  scales = []
   for path in args.qa:
-    blocks += loadQuestionBlocks(path)
+    fileBlocks, scale = loadQuestionBlocks(path)
+    blocks += fileBlocks
+    if scale is not None:
+      scales.append(scale)
   pages = args.pages or countPages(sourceText)
   target = pages * args.min_per_page
   shortage = 0
@@ -233,8 +289,9 @@ def reportQuestionCounts(args, sourceText, inSource, ignored):
     if few:
       print("  " + "，".join(f"{formatNumbers(kind, [n])} {counts[n]}問" for n in few))
       shortage += len(few)
+  shortage += reportLevels(args, blocks, max(scales) if scales else None)
   if shortage:
-    print("\n問数が目安に届いていません．言い換えではなく，触れていない文・式・図・記号・数値について足してください")
+    print("\n問数が目安に届いていません．言い換えではなく，触れていない文・式・図・記号・数値と，足りないレベルの問いを足してください")
   else:
     print("\n問数は目安に届いています")
   return shortage
@@ -265,11 +322,16 @@ def parseArgs():
   parser.add_argument("--min-per-page", type=int, default=DEFAULT_MIN_PER_PAGE, help=f"1ページあたりの問数の目安（既定 {DEFAULT_MIN_PER_PAGE}）")
   parser.add_argument("--min-per-equation", type=int, default=DEFAULT_MIN_PER_EQUATION, help=f"式1つに触れる問数の目安（既定 {DEFAULT_MIN_PER_EQUATION}）")
   parser.add_argument("--min-per-figure", type=int, default=DEFAULT_MIN_PER_FIGURE, help=f"図1つに触れる問数の目安（既定 {DEFAULT_MIN_PER_FIGURE}）")
+  parser.add_argument("--min-level-share", type=float, default=DEFAULT_MIN_LEVEL_SHARE, help=f"5段階のとき，各レベルが全問に占める割合の下限（既定 {DEFAULT_MIN_LEVEL_SHARE}）")
+  parser.add_argument("--min-easy-share", type=float, default=DEFAULT_MIN_EASY_SHARE, help=f"5段階のとき，レベル1〜2が全問に占める割合の下限（既定 {DEFAULT_MIN_EASY_SHARE}．発表者への質問は 0.4）")
   parser.add_argument("--sentences", action="store_true", help="資料の文をページごとに番号付きで書き出して終わる")
   args = parser.parse_args()
   for name in ("pages", "min_per_page", "min_per_equation", "min_per_figure"):
     if getattr(args, name) < 0:
       parser.error(f"--{name.replace('_', '-')} は0以上にしてください")
+  for name in ("min_level_share", "min_easy_share"):
+    if not 0 <= getattr(args, name) <= 1:
+      parser.error(f"--{name.replace('_', '-')} は0以上1以下にしてください")
   return args
 
 

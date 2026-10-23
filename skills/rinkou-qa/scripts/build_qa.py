@@ -17,13 +17,37 @@ import sys
 from pathlib import Path
 
 MIN_LEVEL = 1
-MAX_LEVEL = 3
-LEVEL_NAMES = {1: "レベル1（基礎）", 2: "レベル2（標準）", 3: "レベル3（発展）"}
-LEVEL_DESCRIPTIONS = {
-  1: "定義や意味を聞く質問．1文で即答する．",
-  2: "理由，式や図の読み取り，簡単な計算を聞く質問．結論の後に理由を1つ足す．",
-  3: "導出，資料の範囲外，意地悪な質問．結論と直感的な理由だけを言い，詳しい話は聞かれたら続ける．",
+# 難易度の段階．元データの %levels で選ぶ．書かなければ 1.2.0 までと同じ3段階
+LEVEL_SCALES = {
+  3: {
+    "names": {1: "レベル1（基礎）", 2: "レベル2（標準）", 3: "レベル3（発展）"},
+    "descriptions": {
+      1: "定義や意味を聞く質問．1文で即答する．",
+      2: "理由，式や図の読み取り，簡単な計算を聞く質問．結論の後に理由を1つ足す．",
+      3: "導出，資料の範囲外，意地悪な質問．結論と直感的な理由だけを言い，詳しい話は聞かれたら続ける．",
+    },
+  },
+  5: {
+    "names": {
+      1: "レベル1（超基礎）",
+      2: "レベル2（基礎）",
+      3: "レベル3（標準）",
+      4: "レベル4（応用）",
+      5: "レベル5（発展）",
+    },
+    "descriptions": {
+      1: "言葉や記号の意味，どこに書いてあるかを確かめる質問．「はい」か一言で答える．",
+      2: "図の要素や式の記号を読み取る，文を言い換える質問．資料を指しながら1文で答える．",
+      3: "なぜそうなるか，式や図が何を言っているかを聞く質問．結論の後に理由を1つ足す．",
+      4: "導き方，数値の計算，他の節とのつながり，条件を変えたらどうなるかを聞く質問．式か数値を示して答える．",
+      5: "資料の範囲外，反論，例外，原著の誤りを突く質問．結論と直感的な理由だけを言い，詳しい話は聞かれたら続ける．",
+    },
+  },
 }
+DEFAULT_LEVELS = 3
+LEVELS_PATTERN = re.compile(r"^%levels\s+(\S+)$")
+# 5段階のとき，各レベルが全問に占める割合の下限（下回ると警告）
+MIN_LEVEL_SHARE = 0.1
 STAR_FLAG = "★"
 PRIORITY_FLAG = "!"
 SECTION_HEADING = "## 想定質問"
@@ -43,11 +67,12 @@ BACKUP_LETTERS = string.ascii_lowercase
 RECOMMENDED_PRIORITY_RANGE = (10, 25)
 
 
-def newQuestion(lineNumber, match):
+def newQuestion(lineNumber, match, maxLevel):
   """質問行の正規表現の一致から，質問の辞書を作る．"""
   level = int(match.group(1))
-  if not MIN_LEVEL <= level <= MAX_LEVEL:
-    raise ValueError(f"{lineNumber}行目: レベルは{MIN_LEVEL}〜{MAX_LEVEL}にしてください: {level}")
+  if not MIN_LEVEL <= level <= maxLevel:
+    hint = "（4以上を使うときは，最初の分類より前に %levels 5 と書く）" if maxLevel < max(LEVEL_SCALES) else ""
+    raise ValueError(f"{lineNumber}行目: レベルは{MIN_LEVEL}〜{maxLevel}にしてください{hint}: {level}")
   flags = match.group(2)
   key = match.group(3)
   if key and not key.startswith(KEY_PREFIX):
@@ -63,10 +88,22 @@ def newQuestion(lineNumber, match):
   }
 
 
+def parseLevels(lineNumber, match, categories):
+  """%levels の行から難易度の段階数を読み取る．"""
+  value = match.group(1)
+  if not value.isdigit() or int(value) not in LEVEL_SCALES:
+    choices = "か".join(str(n) for n in sorted(LEVEL_SCALES))
+    raise ValueError(f"{lineNumber}行目: %levels は {choices} にしてください: {value}")
+  if categories:
+    raise ValueError(f"{lineNumber}行目: %levels は最初の分類（# 接頭辞|題名）より前に書いてください")
+  return int(value)
+
+
 def parseSource(path):
-  """元データを読み込み，自由記述のブロックと分類ごとの質問を返す．"""
+  """元データを読み込み，自由記述のブロック，分類ごとの質問，難易度の段階数を返す．"""
   blocks = {"head": [], "practice": [], "tail": []}
   categories = []
+  levels = DEFAULT_LEVELS
   mode = None
   category = None
   question = None
@@ -74,9 +111,12 @@ def parseSource(path):
     for lineNumber, rawLine in enumerate(fileObj, 1):
       line = rawLine.rstrip("\n")
       directive = DIRECTIVE_PATTERN.match(line)
+      levelsMatch = LEVELS_PATTERN.match(line)
       categoryMatch = CATEGORY_PATTERN.match(line)
       questionMatch = QUESTION_PATTERN.match(line)
-      if directive:
+      if levelsMatch:
+        levels = parseLevels(lineNumber, levelsMatch, categories)
+      elif directive:
         mode = directive.group(1)
         category = question = None
       elif categoryMatch:
@@ -92,7 +132,7 @@ def parseSource(path):
       elif questionMatch:
         if mode != "category":
           raise ValueError(f"{lineNumber}行目: 質問が分類（# 接頭辞|題名）の外にあります")
-        question = newQuestion(lineNumber, questionMatch)
+        question = newQuestion(lineNumber, questionMatch, levels)
         category["questions"].append(question)
       elif mode == "category" and MALFORMED_QUESTION_PATTERN.match(line):
         raise ValueError(f"{lineNumber}行目: 質問行の書式が違います（@レベル|フラグ|key=xxx|質問）: {line}")
@@ -102,7 +142,7 @@ def parseSource(path):
         if question is None:
           raise ValueError(f"{lineNumber}行目: 質問（@レベル|…）より前に本文があります: {line}")
         question["answer"].append(line)
-  return {name: trimBlankLines(lines) for name, lines in blocks.items()}, categories
+  return {name: trimBlankLines(lines) for name, lines in blocks.items()}, categories, levels
 
 
 def trimBlankLines(lines):
@@ -227,12 +267,14 @@ def buildPriorityTable(categories, keyToId):
   return lines
 
 
-def buildLevelIndex(categories):
+def buildLevelIndex(categories, levelCount):
   """難易度別の索引の表を組み立てる．"""
-  levels = range(MIN_LEVEL, MAX_LEVEL + 1)
+  levels = range(MIN_LEVEL, levelCount + 1)
+  names = LEVEL_SCALES[levelCount]["names"]
+  descriptions = LEVEL_SCALES[levelCount]["descriptions"]
   lines = ["**難易度別の索引（易しい順に練習する）**", ""]
-  lines += [f"- **{LEVEL_NAMES[level]}**：{LEVEL_DESCRIPTIONS[level]}" for level in levels]
-  lines += ["", "| 分類 | 問数 | " + " | ".join(LEVEL_NAMES[level] for level in levels) + f" | {STAR_FLAG} |"]
+  lines += [f"- **{names[level]}**：{descriptions[level]}" for level in levels]
+  lines += ["", "| 分類 | 問数 | " + " | ".join(names[level] for level in levels) + f" | {STAR_FLAG} |"]
   lines.append("|---|---|" + "---|" * len(levels) + "---|")
   for category in categories:
     questions = category["questions"]
@@ -254,12 +296,12 @@ def buildCategory(category, keyToId):
   return lines
 
 
-def buildSection(blocks, categories, keyToId, updateDate):
+def buildSection(blocks, categories, keyToId, updateDate, levelCount):
   """想定質問の節全体（見出しを含む）を組み立てる．"""
   lines = [SECTION_HEADING, ""]
   lines += fillPlaceholders(blocks["head"], categories, updateDate)
   lines += [""] + buildPriorityTable(categories, keyToId)
-  lines += [""] + buildLevelIndex(categories)
+  lines += [""] + buildLevelIndex(categories, levelCount)
   if blocks["practice"]:
     lines += [""] + fillPlaceholders(blocks["practice"], categories, updateDate)
   for category in categories:
@@ -293,14 +335,32 @@ def backupPath(notePath):
   return candidate
 
 
-def printSummary(categories, warnings):
+def levelShareWarnings(questions, levelCount):
+  """5段階のとき，全問に占める割合が下限に届かないレベルの警告を返す．"""
+  if levelCount <= DEFAULT_LEVELS or not questions:
+    return []
+  warnings = []
+  names = LEVEL_SCALES[levelCount]["names"]
+  for level in range(MIN_LEVEL, levelCount + 1):
+    count = sum(q["level"] == level for q in questions)
+    if count < MIN_LEVEL_SHARE * len(questions):
+      warnings.append(f"{names[level]}が{count}問で，全問の{MIN_LEVEL_SHARE:.0%}に届きません．このレベルの質問を足してください")
+  return warnings
+
+
+def printSummary(categories, warnings, levelCount):
   """問数の集計と警告を標準エラーに出す．"""
-  total = sum(len(c["questions"]) for c in categories)
-  stars = sum(q["star"] for c in categories for q in c["questions"])
-  priority = sum(q["priority"] for c in categories for q in c["questions"])
+  questions = [q for c in categories for q in c["questions"]]
+  total = len(questions)
+  stars = sum(q["star"] for q in questions)
+  priority = sum(q["priority"] for q in questions)
   print(f"想定質問 {total}問（{STAR_FLAG} {stars}問，最優先 {priority}問）", file=sys.stderr)
   for category in categories:
     print(f"  {category['prefix']}: {len(category['questions'])}問", file=sys.stderr)
+  names = LEVEL_SCALES[levelCount]["names"]
+  levelCounts = [f"{names[level]} {sum(q['level'] == level for q in questions)}問" for level in range(MIN_LEVEL, levelCount + 1)]
+  print("  " + "，".join(levelCounts), file=sys.stderr)
+  warnings += levelShareWarnings(questions, levelCount)
   low, high = RECOMMENDED_PRIORITY_RANGE
   if not low <= priority <= high:
     warnings.append(f"最優先の質問が{priority}問です．{low}〜{high}問を目安にしてください")
@@ -320,11 +380,11 @@ def parseArgs():
 
 def main():
   args = parseArgs()
-  blocks, categories = parseSource(args.source)
+  blocks, categories, levelCount = parseSource(args.source)
   validateCategories(categories)
   keyToId = assignIds(categories)
   warnings = checkQuestionText(categories)
-  section = buildSection(blocks, categories, keyToId, args.date)
+  section = buildSection(blocks, categories, keyToId, args.date, levelCount)
   if args.note is None or args.dry_run:
     if args.note is not None:
       replaceSection(args.note.read_text(encoding="utf-8"), section)
@@ -338,7 +398,7 @@ def main():
       print(f"バックアップ: {backup}", file=sys.stderr)
     args.note.write_text(newText, encoding="utf-8")
     print(f"書き込みました: {args.note}", file=sys.stderr)
-  printSummary(categories, warnings)
+  printSummary(categories, warnings, levelCount)
 
 
 if __name__ == "__main__":

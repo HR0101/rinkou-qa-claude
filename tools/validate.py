@@ -11,9 +11,12 @@
 - 同梱スクリプトに実行権限があり，構文エラーがないこと
 - build_qa.py が同梱の実例とひな形から全問を組み立てられ，ノートの節の外を
   変えず，書式の誤りではエラーで止まること
+- build_qa.py が %levels 5 で5段階の索引を作り，配分が偏れば警告すること
 - check_coverage.py が見出しにない式・図を見つけ，すべてあれば成功すること
 - check_coverage.py の --qa が問数の不足を見つけ（元データと番号付きの質問の両方），
   目安に届けば成功し，--sentences が資料の文を番号付きで書き出すこと
+- check_coverage.py の --qa が，5段階のレベルの配分（各レベルの割合，レベル1〜2の割合）の
+  不足を元データとノートの小見出しの両方から見つけること
 - スキル内のすべての Markdown から張った相対リンクの先が実在すること
 
 使い方:
@@ -254,12 +257,37 @@ def checkBrokenSources(tmp: Path) -> None:
     "未定義の参照キー": "# A|分類\n@1|-||質問\n@@nokey@@ を見る．\n",
     "区切りの数の誤り": "# A|分類\n@1|-|質問\n答え．\n",
     "答えのない質問": "# A|分類\n@1|-||質問\n",
+    "宣言のないレベル4": "# A|分類\n@4|-||質問\n答え．\n",
+    "%levels の値の誤り": "%levels 4\n# A|分類\n@1|-||質問\n答え．\n",
+    "分類の後の %levels": "# A|分類\n@1|-||質問\n答え．\n%levels 5\n",
   }
   for label, content in brokenSources.items():
     source = tmp / "broken.txt"
     source.write_text(content, encoding="utf-8")
     if runBuild(str(source)).returncode == 0:
       fail(f"build_qa.py が{label}でも成功終了している")
+
+
+def fiveLevelSource(levels: list[int]) -> str:
+  """指定したレベルの質問を1問ずつ並べた，5段階の元データを返す．"""
+  questions = "".join(f"@{level}|-||質問{index}\n答え．\n" for index, level in enumerate(levels, 1))
+  return "%levels 5\n# A|分類\n" + questions
+
+
+def checkFiveLevels(tmp: Path) -> None:
+  """%levels 5 で5段階の索引ができ，配分が偏ると警告が出ることを確認する．"""
+  source = tmp / "five.txt"
+  source.write_text(fiveLevelSource([1, 2, 3, 4, 5]), encoding="utf-8")
+  result = runBuild(str(source), "--date", FIXED_DATE)
+  header = "| 分類 | 問数 | レベル1（超基礎） | レベル2（基礎） | レベル3（標準） | レベル4（応用） | レベル5（発展） | ★ |"
+  if result.returncode != 0 or header not in result.stdout:
+    fail(f"build_qa.py が %levels 5 で5段階の索引を作っていない: {result.stderr.strip()}")
+  elif "届きません" in result.stderr:
+    fail("build_qa.py が，5段階の配分がそろっているのに警告している")
+  source.write_text(fiveLevelSource([1, 1, 2]), encoding="utf-8")
+  skewed = runBuild(str(source), "--date", FIXED_DATE)
+  if skewed.returncode != 0 or "レベル5（発展）が0問" not in skewed.stderr:
+    fail("build_qa.py が，5段階の配分の偏り（レベル3〜5がない）を警告していない")
 
 
 def checkBuildScript() -> None:
@@ -271,6 +299,7 @@ def checkBuildScript() -> None:
   with tempfile.TemporaryDirectory() as tmp:
     checkNoteReplacement(Path(tmp))
     checkBrokenSources(Path(tmp))
+    checkFiveLevels(Path(tmp))
 
 
 def runCoverageProcess(sourceText: str, noteText: str, tmp: Path, *extra: str) -> subprocess.CompletedProcess:
@@ -336,6 +365,33 @@ def checkQuestionCounts(tmp: Path, sourceText: str, fullNote: str) -> None:
   sentences = runCoverageProcess(twoPages, fullNote, tmp, "--sentences")
   if sentences.returncode != 0 or "p.2-01" not in sentences.stdout:
     fail("check_coverage.py の --sentences が，ページごとの文を書き出していない")
+  checkLevelCounts(tmp, twoPages, fullNote, small)
+
+
+def checkLevelCounts(tmp: Path, sourceText: str, fullNote: str, small: tuple[str, ...]) -> None:
+  """--qa が5段階のレベルの配分を，元データとノートの小見出しの両方から調べることを確認する．"""
+  mentions = "@1|-||式(1.55)，図1.15，式(1.47a)の質問．\n答え．\n"
+  skewed = tmp / "skewed.txt"
+  skewed.write_text(fiveLevelSource([1, 1, 2]) + mentions, encoding="utf-8")
+  if runCoverage(sourceText, fullNote, tmp, "--qa", str(skewed), *small) != 1:
+    fail("check_coverage.py の --qa が，元データのレベルの偏り（レベル3〜5がない）を見つけていない")
+  balanced = tmp / "balanced.txt"
+  balanced.write_text(fiveLevelSource([1, 2, 3, 4, 5]) + mentions, encoding="utf-8")
+  if runCoverage(sourceText, fullNote, tmp, "--qa", str(balanced), *small) != 0:
+    fail("check_coverage.py の --qa が，レベルがそろった元データで失敗している")
+  leveled = tmp / "leveled.md"
+  leveled.write_text(
+    "## 6. 質問\n\n### 6-1. レベル1（言葉の確認）\n\n1. 【式(1.55)】質問．\n   - → 答え．\n2. 【図1.15】質問．\n"
+    "\n### 6-2. レベル2（読み取り）\n\n3. 【式(1.47a)】質問．\n\n### 6-3. レベル3（理由）\n\n4. 質問．\n"
+    "\n### 6-4. レベル4（式・数値・つながり）\n\n5. 質問．\n\n### 6-5. レベル5（発展・誤り）\n\n6. 質問．\n"
+    "\n## 7. 表記・文体の指摘\n\n7. 指摘．\n",
+    encoding="utf-8",
+  )
+  result = runCoverageProcess(sourceText, fullNote, tmp, "--qa", str(leveled), *small)
+  if result.returncode != 0 or "レベル1 2問" not in result.stdout or "レベルなし 1問" not in result.stdout:
+    fail("check_coverage.py の --qa が，ノートの小見出しからレベルを読めていない")
+  if runCoverage(sourceText, fullNote, tmp, "--qa", str(leveled), *small, "--min-easy-share", "0.9") != 1:
+    fail("check_coverage.py の --min-easy-share が，易しい質問の不足を見つけていない")
 
 
 def main() -> int:
