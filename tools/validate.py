@@ -19,6 +19,7 @@
   不足を元データとノートの小見出しの両方から見つけること
 - check_coverage.py の --min-open-share が，答えが「はい」で始まる質問ばかりのときに
   説明してもらう質問の不足を見つけること
+- check_coverage.py の --sentences が，手順の文と理由が書かれていない文に印を付けること
 - スキル内のすべての Markdown から張った相対リンクの先が実在すること
 
 使い方:
@@ -367,6 +368,12 @@ def checkQuestionCounts(tmp: Path, sourceText: str, fullNote: str) -> None:
   sentences = runCoverageProcess(twoPages, fullNote, tmp, "--sentences")
   if sentences.returncode != 0 or "p.2-01" not in sentences.stdout:
     fail("check_coverage.py の --sentences が，ページごとの文を書き出していない")
+  procedure = "まず信号を高い率で標本化する．次に標本化率を下げる．帯域が広いため標本化率を上げる．ステップ幅は1 Vである．\n"
+  marked = runCoverageProcess(procedure, fullNote, tmp, "--sentences").stdout
+  if "p.1-01 〔手順〕" not in marked or "p.1-02 〔手順〕〔理由なし〕" not in marked:
+    fail("check_coverage.py の --sentences が，手順の文と理由が書かれていない文に印を付けていない")
+  if "p.1-03 〔" in marked or "p.1-04 〔" in marked:
+    fail("check_coverage.py の --sentences が，理由のある文やステップ幅の文にまで印を付けている")
   checkLevelCounts(tmp, twoPages, fullNote, small)
 
 

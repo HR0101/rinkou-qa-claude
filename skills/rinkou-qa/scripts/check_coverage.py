@@ -5,7 +5,7 @@
 --qa を付けると，想定質問・逆質問・発表者への質問が，資料のページ数と式・図の数に
 見合うだけあるか（問数の目安）と，難易度（レベル1〜5）の配分，答えが「はい」で終わる質問と
 答えを説明してもらう質問の割合も調べる．
---sentences は資料の文を番号付きで書き出す．
+--sentences は資料の文を番号付きで書き出し，手順の文と理由が書かれていない文に印を付ける．
 
 使い方:
   python3 check_coverage.py 資料.pdf ノート.md
@@ -64,6 +64,13 @@ QUESTION_SECTION_WORDS = ("質問", "指摘")
 SENTENCE_END = re.compile(r"(?<=[．。])")
 MIN_SENTENCE_LENGTH = 8
 CJK_GAP = re.compile(r"(?<=[^\x00-\x7F])\s+(?=[^\x00-\x7F])")
+# --sentences の印．手順の文には「なぜ要るか・なぜこの順か・省くとどうなるか」，
+# 理由が書かれていない文には「なぜか」を立てる（逆質問で突かれやすい）
+STEP_WORDS = re.compile(r"(?<!量子化)ステップ(?!幅)|手順|まず|次に|その後|最後に|第[一二三四五1-5]に|した後|してから|に先立|の前に|の後に|後で")
+NEED_WORDS = re.compile(r"必要|要する|要求|べき|しなければ|選ぶ|選択|下げる|上げる|増やす|減らす|戻す|用いる(?!と)|使用する(?!と)")
+REASON_WORDS = re.compile(r"ため|から|ので|理由|なぜ|によって|により|結果")
+STEP_MARK = "〔手順〕"
+NO_REASON_MARK = "〔理由なし〕"
 MULTI_SPACE = re.compile(r"\s{2,}")
 
 
@@ -336,18 +343,36 @@ def reportQuestionCounts(args, sourceText, inSource, ignored):
   return shortage
 
 
+def sentenceMarks(sentence):
+  """文に付ける印（手順の文，理由が書かれていない文）を返す．"""
+  marks = ""
+  if STEP_WORDS.search(sentence):
+    marks += STEP_MARK
+  if NEED_WORDS.search(sentence) and not REASON_WORDS.search(sentence):
+    marks += NO_REASON_MARK
+  return marks
+
+
 def printSentences(sourceText):
-  """資料の文をページごとに番号付きで書き出す（1文に1問以上を作るための作業表）．"""
+  """資料の文をページごとに番号付きで書き出す（1文に1問以上を作るための作業表）．
+
+  手順の文と，理由が書かれていない文に印を付け，最後に数を出す．
+  """
   pages = [page for page in sourceText.split("\f") if page.strip()]
-  total = 0
+  total = steps = noReasons = 0
   for pageIndex, page in enumerate(pages, start=1):
     flat = CJK_GAP.sub("", " ".join(line.strip() for line in page.splitlines() if line.strip()))
     flat = MULTI_SPACE.sub(" ", flat)
     sentences = [s.strip() for s in SENTENCE_END.split(flat) if len(s.strip()) >= MIN_SENTENCE_LENGTH]
     for sentenceIndex, sentence in enumerate(sentences, start=1):
-      print(f"p.{pageIndex}-{sentenceIndex:02d} {sentence}")
+      marks = sentenceMarks(sentence)
+      steps += STEP_MARK in marks
+      noReasons += NO_REASON_MARK in marks
+      print(f"p.{pageIndex}-{sentenceIndex:02d} {marks}{sentence}")
     total += len(sentences)
   print(f"\n全{total}文（{len(pages)}ページ）")
+  print(f"{STEP_MARK}{steps}文：各ステップに「なぜ要るか」「なぜこの順か」「省くとどうなるか」「前後で何が変わるか」を立てる")
+  print(f"{NO_REASON_MARK}{noReasons}文：「なぜ〜するのですか」を立て，答えはほかのページの記述から組み立てる")
 
 
 def parseArgs():

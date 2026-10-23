@@ -65,7 +65,7 @@ description: 書籍輪講・ゼミ発表の準備ノート（Markdown）を作�
 - `references/`：作り方（[own-talk.md](references/own-talk.md)，[peer-notes.md](references/peer-notes.md)，[checklist.md](references/checklist.md)，[source-format.md](references/source-format.md)）
 - `templates/`：ノートのひな形（[own-talk.md](templates/own-talk.md)，[assignment-talk.md](templates/assignment-talk.md)，[peer-notes.md](templates/peer-notes.md)，[peer-reverse-qa_source.txt](templates/peer-reverse-qa_source.txt)，[session-memo.md](templates/session-memo.md)）
 - `scripts/build_qa.py`：元データから「## 想定質問」節を組み立てて差し替える．元データの先頭に `%levels 5` と書くと5段階の索引を作る
-- `scripts/check_coverage.py`：資料の PDF に出てくる式・図・表の番号が，ノートの見出しにすべてあるかを調べる．`--qa` で問数とレベルの配分が目安に届いているか，`--sentences` で資料の文の一覧（1文に1問以上を作る作業表）も出す
+- `scripts/check_coverage.py`：資料の PDF に出てくる式・図・表の番号が，ノートの見出しにすべてあるかを調べる．`--qa` で問数とレベルの配分が目安に届いているか，`--sentences` で資料の文の一覧（1文に1問以上を作る作業表．手順の文と理由が書かれていない文に印）も出す
 - `examples/`：想定質問の元データの実例（[Kadai20261013_source.txt](examples/Kadai20261013_source.txt)，268問）
 
 ## 想定質問の作り方
@@ -81,8 +81,9 @@ description: 書籍輪講・ゼミ発表の準備ノート（Markdown）を作�
 2. **洗い出す**：[references/checklist.md](references/checklist.md) の観点を，課題ごと・節ごとにすべて当てる．分類の決まりも同じファイルにある．
    - 資料の文を書き出し，**1文に1問以上**を作る．式は1つにつき7問以上，図は1つにつき8問以上（観点は checklist.md の「足りないときの増やし方」）．
    - 各問に**レベル1〜5**を付ける（下の「難易度の5段階」）．同じ文・式・図に，レベル1の「〇〇とは何ですか」からレベル5の「〜のときも成り立ちますか」まで段階を変えて立てる．
+   - **手順と理由の書かれていない文**：`--sentences` の〔手順〕の文はステップごとに「なぜ要るか」「なぜこの順か」「省くとどうなるか」「前後で何が変わるか」を，〔理由なし〕の文は「なぜですか」を立てる．上げた率を下げる，圧縮した信号を伸長するなど対になる操作は「なぜ戻すのか」を必ず聞く（実際に来た逆質問：「オーバーサンプリングをした後に再標本化する理由は？」）．
      ```bash
-     python3 -I scripts/check_coverage.py 資料.pdf ノート.md --sentences   # p.1-01 の形で全文を書き出す
+     python3 -I scripts/check_coverage.py 資料.pdf ノート.md --sentences   # p.1-01 の形で全文を書き出し，〔手順〕〔理由なし〕の印を付ける
      ```
 3. **元データを書く**：作業用の一時ディレクトリに元データのテキストファイルを作る．書式は [references/source-format.md](references/source-format.md)．逆質問なら [templates/peer-reverse-qa_source.txt](templates/peer-reverse-qa_source.txt) から始める．
    - 新しく作る元データは，先頭に `%levels 5` と書いて5段階にする．既存の3段階の元データ（`%levels` なし）に足すだけなら3段階のままでよい．全問を5段階に付け直すと索引の表が変わるので，ユーザーに確かめてからにする．
