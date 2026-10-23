@@ -17,6 +17,8 @@
   目安に届けば成功し，--sentences が資料の文を番号付きで書き出すこと
 - check_coverage.py の --qa が，5段階のレベルの配分（各レベルの割合，レベル1〜2の割合）の
   不足を元データとノートの小見出しの両方から見つけること
+- check_coverage.py の --min-open-share が，答えが「はい」で始まる質問ばかりのときに
+  説明してもらう質問の不足を見つけること
 - スキル内のすべての Markdown から張った相対リンクの先が実在すること
 
 使い方:
@@ -392,6 +394,23 @@ def checkLevelCounts(tmp: Path, sourceText: str, fullNote: str, small: tuple[str
     fail("check_coverage.py の --qa が，ノートの小見出しからレベルを読めていない")
   if runCoverage(sourceText, fullNote, tmp, "--qa", str(leveled), *small, "--min-easy-share", "0.9") != 1:
     fail("check_coverage.py の --min-easy-share が，易しい質問の不足を見つけていない")
+  checkAnswerKinds(tmp, sourceText, fullNote, small)
+
+
+def checkAnswerKinds(tmp: Path, sourceText: str, fullNote: str, small: tuple[str, ...]) -> None:
+  """--min-open-share が，「はい」で答える質問と説明してもらう質問の割合を調べることを確認する．"""
+  answers = tmp / "answers.md"
+  answers.write_text(
+    "## 6. 質問\n\n1. 【式(1.55)】〜ですね．\n   - → はい．\n2. 【図1.15】〜という理解でよいですか．\n   - → はい．補足．\n"
+    "3. 【式(1.47a)】〇〇とは何ですか．\n   - → 〜のこと．\n4. なぜですか．\n   - → 〜だから．\n\n"
+    "## 7. 表記・文体の指摘\n\n5. 指摘（答えの行なし）．\n",
+    encoding="utf-8",
+  )
+  result = runCoverageProcess(sourceText, fullNote, tmp, "--qa", str(answers), *small, "--min-open-share", "0.5")
+  if result.returncode != 0 or "「はい」で答える質問 2問，説明してもらう質問 2問" not in result.stdout:
+    fail("check_coverage.py が，「はい」で答える質問と説明してもらう質問を正しく数えていない")
+  if runCoverage(sourceText, fullNote, tmp, "--qa", str(answers), *small, "--min-open-share", "0.6") != 1:
+    fail("check_coverage.py の --min-open-share が，説明してもらう質問の不足を見つけていない")
 
 
 def main() -> int:
