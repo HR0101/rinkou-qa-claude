@@ -6,6 +6,8 @@
 見合うだけあるか（問数の目安）と，難易度（レベル1〜5）の配分，答えが「はい」で終わる質問と
 答えを説明してもらう質問の割合，資料を見ただけでは答えが出ない「考えて答える質問」の数，
 発表者への質問に「意図：」「言い換え：」の行がそろっているか（--require-intent）も調べる．
+--quality を付けると，質問一つ一つの品質を点検する候補（重複，二つ以上聞いている，長すぎる，
+漠然としている，考えて答える質問の答えに根拠がない）を一覧にする（終了コードには影響しない）．
 --sentences は資料の文を番号付きで書き出し，手順の文と理由が書かれていない文に印を付ける．
 
 使い方:
@@ -14,6 +16,7 @@
   python3 check_coverage.py --text 資料.txt ノート.md     （テキストを取り出し済みのとき）
   python3 check_coverage.py 資料.pdf ノート.md --qa 元データ.txt
   python3 check_coverage.py 資料.pdf ノート.md --qa 解説・質問.md --min-per-page 15 --min-per-equation 2 --min-per-figure 2 --min-easy-share 0.2 --min-open-share 0.4 --min-deep-per-page 5 --require-intent
+  python3 check_coverage.py 資料.pdf ノート.md --qa 元データ.txt --quality
   python3 check_coverage.py 資料.pdf ノート.md --sentences
 
 PDF のテキストは pdftotext（Poppler）で取り出す．
@@ -56,6 +59,15 @@ DEFAULT_MIN_DEEP_PER_PAGE = 0
 # 発表者への質問で，聞き返されたときに言う「意図」と「言い換え」の行
 INTENT_LINE = re.compile(r"^\s*-\s*意図[：:]")
 REPHRASE_LINE = re.compile(r"^\s*-\s*言い換え[：:]")
+# 品質の点検（--quality）の基準
+MAX_QUESTION_LENGTH = 90
+DUPLICATE_SIMILARITY = 0.65
+STOCK_PHRASES = re.compile(r"とは何ですか|は何ですか|はいくらですか|はどうなりますか|どうなりますか|を一言で言ってください|という理解でよいですか|ですね|なぜですか|のはなぜですか")
+QUESTION_ENDINGS = re.compile(r"(?:か|ください)[．？?]")
+VAGUE_PHRASE = re.compile(r"について(?:説明|教えて|どう思)")
+SPECIFIC_POINTER = re.compile(r"式\(|図\s?\d|p\.\s?\d|ページ|\d+\.\d+")
+GROUNDS = re.compile(r"p\.\s?\d|ページ|式\(|図\s?\d|節|資料|原著")
+NUMBER_TOKEN = re.compile(r"\d+(?:\.\d+)*")
 # 解説・質問ファイルの想定回答の行（   - → 答え）
 ARROW_ANSWER = re.compile(r"^\s*-\s*→\s*(.*)$")
 # 質問のまとまりの始まり（元データの @行，組み立てた節の **A1．，番号付きの質問）
@@ -302,6 +314,70 @@ def reportIntents(blocks):
   return 0
 
 
+def questionParts(block):
+  """質問のまとまりから，番号，質問の文（印・【】・★を除いた本文），答えの文を取り出す．"""
+  lines = block["text"].split("\n")
+  first = lines[0]
+  if first.startswith("@"):
+    first = first.split("|", 3)[3]
+    ident = ""
+  else:
+    match = re.match(r"^(?:\*\*)?([A-Z]*\d+)[.．]\s*", first)
+    ident = match.group(1) if match else ""
+    first = first[match.end():] if match else first
+  question = re.sub(r"〔[^〕]*〕|【[^】]*】|★|\*\*$", "", first).strip()
+  arrows = [ARROW_ANSWER.match(line) for line in lines[1:]]
+  answers = [m.group(1) for m in arrows if m] or [line.strip() for line in lines[1:] if line.strip()]
+  return ident, first, question, " ".join(answers)
+
+
+def bigramSet(text):
+  """似ているかを比べるための2文字の組の集合（決まり文句と記号を除く）．"""
+  text = STOCK_PHRASES.sub("", text)
+  text = re.sub(r"[\s，．、。？?「」（）()$\\{}_^|]", "", text)
+  return {text[i:i + 2] for i in range(len(text) - 1)}
+
+
+def reportQuality(blocks):
+  """質問一つ一つの品質を点検する候補を一覧にする（終了コードには影響しない）．"""
+  parts = [questionParts(block) for block in blocks]
+  labels = [ident or f"{index + 1}問目" for index, (ident, _, _, _) in enumerate(parts)]
+  candidates = {
+    "二つ以上聞いている（一問一義にする）": [],
+    f"長すぎる（{MAX_QUESTION_LENGTH}字より長い．短く一回で伝わる文にする）": [],
+    "漠然としている（式・図・ページで指す所を決める）": [],
+    "考えて答える質問の答えに根拠がない（資料のどこを組み合わせたかを書く）": [],
+  }
+  keys = list(candidates)
+  for label, (ident, first, question, answer) in zip(labels, parts):
+    if len(QUESTION_ENDINGS.findall(question)) >= 2:
+      candidates[keys[0]].append(label)
+    if len(question) > MAX_QUESTION_LENGTH:
+      candidates[keys[1]].append(label)
+    if VAGUE_PHRASE.search(question) and not SPECIFIC_POINTER.search(first):
+      candidates[keys[2]].append(label)
+    if DEEP_TAG.search(first) and not GROUNDS.search(answer + first):
+      candidates[keys[3]].append(label)
+  grams = [bigramSet(question) for _, _, question, _ in parts]
+  numbers = [set(NUMBER_TOKEN.findall(question)) for _, _, question, _ in parts]
+  duplicates = []
+  for a in range(len(parts)):
+    for b in range(a + 1, len(parts)):
+      if numbers[a] != numbers[b] or not grams[a] or not grams[b]:
+        continue
+      similarity = len(grams[a] & grams[b]) / len(grams[a] | grams[b])
+      if similarity >= DUPLICATE_SIMILARITY:
+        duplicates.append(f"{labels[a]}と{labels[b]}")
+  print("\n品質の点検の候補（一つずつ読み，直すか，そのままでよい理由を確かめる）：")
+  print(f"  重複の候補（同じ答えになるなら1つにまとめ，空いた枠を触れていない所の質問にする）：{len(duplicates)}組")
+  if duplicates:
+    print("    " + "，".join(duplicates[:20]) + ("，…" if len(duplicates) > 20 else ""))
+  for name, labelsFound in candidates.items():
+    print(f"  {name}：{len(labelsFound)}問")
+    if labelsFound:
+      print("    " + "，".join(labelsFound[:20]) + ("，…" if len(labelsFound) > 20 else ""))
+
+
 def loadQuestionBlocks(path):
   """元データ（.txt）かノート（.md）から，質問ごとのテキストとレベル，難易度の段階数を取り出す．"""
   lines = path.read_text(encoding="utf-8").splitlines()
@@ -379,6 +455,8 @@ def reportQuestionCounts(args, sourceText, inSource, ignored):
   shortage += reportDeepQuestions(args, blocks, pages)
   if args.require_intent:
     shortage += reportIntents(blocks)
+  if args.quality:
+    reportQuality(blocks)
   if shortage:
     print("\n問数が目安に届いていません．言い換えではなく，触れていない文・式・図・記号・数値と，足りないレベルの問い，欠けている意図と言い換えを足してください")
   else:
@@ -434,6 +512,7 @@ def parseArgs():
   parser.add_argument("--min-open-share", type=float, default=DEFAULT_MIN_OPEN_SHARE, help=f"答えが「はい」で始まらない（説明してもらう）質問の割合の下限（既定 {DEFAULT_MIN_OPEN_SHARE}．発表者への質問は 0.4）")
   parser.add_argument("--min-deep-per-page", type=int, default=DEFAULT_MIN_DEEP_PER_PAGE, help=f"考えて答える質問（〔組み合わせ〕などの印付き）の1ページあたりの下限（既定 {DEFAULT_MIN_DEEP_PER_PAGE}．逆質問と発表者への質問は 5）")
   parser.add_argument("--require-intent", action="store_true", help="発表者への質問（番号付き）に「- 意図：」「- 言い換え：」の行がそろっているかを調べる")
+  parser.add_argument("--quality", action="store_true", help="質問一つ一つの品質を点検する候補（重複，二つ以上聞いている，長すぎる，漠然，根拠のない答え）を一覧にする")
   parser.add_argument("--sentences", action="store_true", help="資料の文をページごとに番号付きで書き出して終わる")
   args = parser.parse_args()
   for name in ("pages", "min_per_page", "min_per_equation", "min_per_figure", "min_deep_per_page"):

@@ -22,6 +22,7 @@
 - check_coverage.py の --sentences が，手順の文と理由が書かれていない文に印を付けること
 - check_coverage.py の --min-deep-per-page が，考えて答える質問（〔組み合わせ〕などの印）の不足を見つけること
 - check_coverage.py の --require-intent が，「意図：」「言い換え：」の行が欠けた質問を見つけること
+- check_coverage.py の --quality が，重複の候補と二つ以上聞いている質問を見つけ，終了コードを変えないこと
 - スキル内のすべての Markdown から張った相対リンクの先が実在すること
 
 使い方:
@@ -445,6 +446,18 @@ def checkAnswerKinds(tmp: Path, sourceText: str, fullNote: str, small: tuple[str
   result = runCoverageProcess(sourceText, fullNote, tmp, "--qa", str(intents), *small, "--require-intent")
   if result.returncode != 1 or "欠けている番号：1．" not in result.stdout:
     fail("check_coverage.py の --require-intent が，言い換えの欠けた質問を見つけていない")
+  quality = tmp / "quality.md"
+  quality.write_text(
+    "## 6. 質問\n\n1. 【式(1.55)】入力の帯域幅を半分にすると，出力の帯域幅はどうなりますか．\n   - → 〜．\n"
+    "2. 【式(1.55)】入力の帯域幅を半分にすると，出力の帯域幅はどうなりますか？\n   - → 〜．\n"
+    "3. 【図1.15】〜は何ですか．それはなぜですか．\n   - → 〜．\n4. 【式(1.47a)】〜はいくらですか．\n   - → 〜．\n",
+    encoding="utf-8",
+  )
+  result = runCoverageProcess(sourceText, fullNote, tmp, "--qa", str(quality), *small, "--quality")
+  if result.returncode != 0:
+    fail("check_coverage.py の --quality が，終了コードを変えている")
+  if "1と2" not in result.stdout or "二つ以上聞いている（一問一義にする）：1問" not in result.stdout:
+    fail("check_coverage.py の --quality が，重複の候補や二つ以上聞いている質問を見つけていない")
 
 
 def main() -> int:
