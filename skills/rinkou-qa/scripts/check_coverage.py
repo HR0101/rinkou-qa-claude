@@ -8,7 +8,8 @@
 発表者への質問に「意図：」「言い換え：」の行がそろっているか（--require-intent）も調べる．
 --quality を付けると，質問一つ一つの品質を点検する候補（重複，二つ以上聞いている，長すぎる，
 漠然としている，考えて答える質問の答えに根拠がない）を一覧にする（終了コードには影響しない）．
---sentences は資料の文を番号付きで書き出し，手順の文と理由が書かれていない文に印を付ける．
+--sentences は資料の文を番号付きで書き出し，手順の文，理由が書かれていない文，実際に聞かれやすい型
+（命名，仮定，評価語，列挙）の文に印を付ける．
 
 使い方:
   python3 check_coverage.py 資料.pdf ノート.md
@@ -90,6 +91,16 @@ NEED_WORDS = re.compile(r"必要|要する|要求|べき|しなければ|選ぶ|
 REASON_WORDS = re.compile(r"ため|から|ので|理由|なぜ|によって|により|結果")
 STEP_MARK = "〔手順〕"
 NO_REASON_MARK = "〔理由なし〕"
+# 輪講の逆質問で実際に聞かれた型（references/real-questions.md）．「〜と呼ぶ理由」「〜とする理由」
+# 「〜が重要な理由」「どのような二つの性質」に当たる文に印を付ける
+NAMING_WORDS = re.compile(r"と呼[ぶびば]|とよぶ|と称す|と定義")
+ASSUMPTION_WORDS = re.compile(r"ものとする|と仮定|を仮定|仮定する|とみなす|を前提|が前提|とおく|と置く")
+EVALUATION_WORDS = re.compile(r"重要|最も|もっとも|賢明|一般的|単純|便利|有用|基本的|多くの場合|しばしば")
+ENUMERATION_WORDS = re.compile(r"[二三四五2-5]\s*つの?(?:性質|条件|特徴|仮定|要素|種類|方法|段階|基準)|次の[二三四五2-5]\s*つ")
+NAMING_MARK = "〔命名〕"
+ASSUMPTION_MARK = "〔仮定〕"
+EVALUATION_MARK = "〔評価語〕"
+ENUMERATION_MARK = "〔列挙〕"
 MULTI_SPACE = re.compile(r"\s{2,}")
 
 
@@ -465,22 +476,30 @@ def reportQuestionCounts(args, sourceText, inSource, ignored):
 
 
 def sentenceMarks(sentence):
-  """文に付ける印（手順の文，理由が書かれていない文）を返す．"""
+  """文に付ける印を返す．
+
+  手順の文，理由が書かれていない文，実際に聞かれやすい型（命名，仮定，評価語，列挙）の文に付ける．
+  """
   marks = ""
   if STEP_WORDS.search(sentence):
     marks += STEP_MARK
   if NEED_WORDS.search(sentence) and not REASON_WORDS.search(sentence):
     marks += NO_REASON_MARK
+  for pattern, mark in ((NAMING_WORDS, NAMING_MARK), (ASSUMPTION_WORDS, ASSUMPTION_MARK),
+                        (EVALUATION_WORDS, EVALUATION_MARK), (ENUMERATION_WORDS, ENUMERATION_MARK)):
+    if pattern.search(sentence):
+      marks += mark
   return marks
 
 
 def printSentences(sourceText):
   """資料の文をページごとに番号付きで書き出す（1文に1問以上を作るための作業表）．
 
-  手順の文と，理由が書かれていない文に印を付け，最後に数を出す．
+  手順の文，理由が書かれていない文，実際に聞かれやすい型の文に印を付け，最後に数を出す．
   """
   pages = [page for page in sourceText.split("\f") if page.strip()]
   total = steps = noReasons = 0
+  typeCounts = {NAMING_MARK: 0, ASSUMPTION_MARK: 0, EVALUATION_MARK: 0, ENUMERATION_MARK: 0}
   for pageIndex, page in enumerate(pages, start=1):
     flat = CJK_GAP.sub("", " ".join(line.strip() for line in page.splitlines() if line.strip()))
     flat = MULTI_SPACE.sub(" ", flat)
@@ -489,11 +508,18 @@ def printSentences(sourceText):
       marks = sentenceMarks(sentence)
       steps += STEP_MARK in marks
       noReasons += NO_REASON_MARK in marks
+      for mark in typeCounts:
+        typeCounts[mark] += mark in marks
       print(f"p.{pageIndex}-{sentenceIndex:02d} {marks}{sentence}")
     total += len(sentences)
   print(f"\n全{total}文（{len(pages)}ページ）")
   print(f"{STEP_MARK}{steps}文：各ステップに「なぜ要るか」「なぜこの順か」「省くとどうなるか」「前後で何が変わるか」を立てる")
   print(f"{NO_REASON_MARK}{noReasons}文：「なぜ〜するのですか」を立て，答えはほかのページの記述から組み立てる")
+  print(f"{NAMING_MARK}{typeCounts[NAMING_MARK]}文：「〜と呼ぶのは，なぜですか」を立てる（名前と中身が食い違って見える語を優先）")
+  print(f"{ASSUMPTION_MARK}{typeCounts[ASSUMPTION_MARK]}文：「〜とするのは，なぜですか」「置かないと何が変わりますか」を立てる")
+  print(f"{EVALUATION_MARK}{typeCounts[EVALUATION_MARK]}文：「〜が重要（最も一般的）なのは，なぜですか」を立て，一言版の答えも用意する")
+  print(f"{ENUMERATION_MARK}{typeCounts[ENUMERATION_MARK]}文：「どのような〇つの条件ですか」に，数と名前を言えるよう一覧にする")
+  print("型の詳しい作り方は references/real-questions.md")
 
 
 def parseArgs():

@@ -20,6 +20,7 @@
 - check_coverage.py の --min-open-share が，答えが「はい」で始まる質問ばかりのときに
   説明してもらう質問の不足を見つけること
 - check_coverage.py の --sentences が，手順の文と理由が書かれていない文に印を付けること
+- check_coverage.py の --sentences が，実際に聞かれやすい型（命名，仮定，評価語，列挙）の文に印を付けること
 - check_coverage.py の --min-deep-per-page が，考えて答える質問（〔組み合わせ〕などの印）の不足を見つけること
 - check_coverage.py の --require-intent が，「意図：」「言い換え：」の行が欠けた質問を見つけること
 - check_coverage.py の --quality が，重複の候補と二つ以上聞いている質問を見つけ，終了コードを変えないこと
@@ -377,6 +378,20 @@ def checkQuestionCounts(tmp: Path, sourceText: str, fullNote: str) -> None:
     fail("check_coverage.py の --sentences が，手順の文と理由が書かれていない文に印を付けていない")
   if "p.1-03 〔" in marked or "p.1-04 〔" in marked:
     fail("check_coverage.py の --sentences が，理由のある文やステップ幅の文にまで印を付けている")
+  types = (
+    "電力が半分になる周波数を半電力点と呼ぶ．入力を加える時点でエネルギーを蓄えていないものとする．"
+    "これは最も重要な性質である．広義定常は二つの性質で定まる．信号は直交する．\n"
+  )
+  typed = runCoverageProcess(types, fullNote, tmp, "--sentences").stdout
+  expected = (
+    ("p.1-01 〔命名〕", "〔命名〕"), ("p.1-02 〔仮定〕", "〔仮定〕"),
+    ("p.1-03 〔評価語〕", "〔評価語〕"), ("p.1-04 〔列挙〕", "〔列挙〕"),
+  )
+  for prefix, mark in expected:
+    if prefix not in typed:
+      fail(f"check_coverage.py の --sentences が，{mark}の文に印を付けていない")
+  if "p.1-05 〔" in typed:
+    fail("check_coverage.py の --sentences が，型に当たらない文にまで印を付けている")
   checkLevelCounts(tmp, twoPages, fullNote, small)
 
 
