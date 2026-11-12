@@ -18,10 +18,13 @@
   python3 check_coverage.py 資料.pdf ノート.md --qa 元データ.txt
   python3 check_coverage.py 資料.pdf ノート.md --qa 解説・質問.md --min-per-page 15 --min-per-equation 2 --min-per-figure 2 --min-easy-share 0.2 --min-open-share 0.4 --min-deep-per-page 5 --require-intent
   python3 check_coverage.py 資料.pdf ノート.md --qa 元データ.txt --quality
+  python3 check_coverage.py 資料.pdf 逆質問ノート.md --qa 元データ.txt --no-headings   （解説の見出しがないノート．式・図の見出しの検査を省く）
   python3 check_coverage.py 資料.pdf ノート.md --sentences
 
 PDF のテキストは pdftotext（Poppler）で取り出す．
 見出しにない番号があるか，--qa の問数やレベルの配分が目安に届かなければ，一覧を出して終了コード1で終わる．
+式・図の解説を作らないノート（逆質問，軽量版の質問ノート）では --no-headings を付け，見出しの検査を省く．
+キーワードタグ（〔キーワード: …〕）に書いた式番号・図番号は，式・図ごとの問数に数えない．
 """
 import argparse
 import re
@@ -79,6 +82,8 @@ LEVEL_HEADING = re.compile(r"レベル([1-9])")
 BUILT_QUESTION = re.compile(r"^\*\*[A-Z]+\d+．")
 NUMBERED_QUESTION = re.compile(r"^\d+\.\s")
 BLOCK_END = re.compile(r"^(#{1,6}\s|# |%)")
+# 単語検索用のキーワードタグ．式番号・図番号を書くので，式・図ごとの問数には数えない
+KEYWORD_TAG = re.compile(r"〔キーワード[：:][^〕]*〕")
 QUESTION_SECTION_WORDS = ("質問", "指摘")
 # 文の区切り（全角・半角の句点）と，文として数えない短すぎる断片の長さ
 SENTENCE_END = re.compile(r"(?<=[．。])")
@@ -247,11 +252,12 @@ def splitNoteBlocks(lines):
         section = line
         level = None
       else:
-        match = LEVEL_HEADING.search(line)
+        # レベルは見出し3（### 6-1. レベル1（…））だけから読む．見出し4以下（#### 3.1節 など）は，
+        # 「量子化レベル2」のようにレベルの語を含んでいても level を維持する
+        match = LEVEL_HEADING.search(line) if line.startswith("### ") else None
         if match and not built and inSection(section):
           level = int(match.group(1))
           scale = FIVE_LEVELS
-        # match しない見出し（節見出し #### 3.1節 など）のときは level を維持する
       current = None
       continue
     if starter.match(line) and inSection(section):
@@ -403,7 +409,7 @@ def countMentions(kind, numbers, blocks):
   """式・図の番号ごとに，その番号に触れている質問の数を数える．"""
   counts = {number: 0 for number in numbers}
   for block in blocks:
-    found = findNumbers(block["text"], expand=True)[kind]
+    found = findNumbers(KEYWORD_TAG.sub("", block["text"]), expand=True)[kind]
     for number in numbers:
       if isCovered(kind, number, found):
         counts[number] += 1
@@ -539,6 +545,7 @@ def parseArgs():
   parser.add_argument("--min-easy-share", type=float, default=DEFAULT_MIN_EASY_SHARE, help=f"5段階のとき，レベル1〜2が全問に占める割合の下限（既定 {DEFAULT_MIN_EASY_SHARE}．発表者への質問は 0.4）")
   parser.add_argument("--min-open-share", type=float, default=DEFAULT_MIN_OPEN_SHARE, help=f"答えが「はい」で始まらない（説明してもらう）質問の割合の下限（既定 {DEFAULT_MIN_OPEN_SHARE}．発表者への質問は 0.4）")
   parser.add_argument("--min-deep-per-page", type=int, default=DEFAULT_MIN_DEEP_PER_PAGE, help=f"考えて答える質問（〔組み合わせ〕などの印付き）の1ページあたりの下限（既定 {DEFAULT_MIN_DEEP_PER_PAGE}．逆質問と発表者への質問は 5）")
+  parser.add_argument("--no-headings", action="store_true", help="式・図・表の番号が見出しにあるかの検査を省く（解説を作らない逆質問や軽量版の質問ノート用）")
   parser.add_argument("--require-intent", action="store_true", help="発表者への質問（番号付き）に「- 意図：」「- 言い換え：」の行がそろっているかを調べる")
   parser.add_argument("--quality", action="store_true", help="質問一つ一つの品質を点検する候補（重複，二つ以上聞いている，長すぎる，漠然，根拠のない答え）を一覧にする")
   parser.add_argument("--sentences", action="store_true", help="資料の文をページごとに番号付きで書き出して終わる")
@@ -565,19 +572,22 @@ def main():
   inNote = findNumbers(headingText(args.note), expand=True)
   ignored = normalizeIgnore(args.ignore)
   missingCount = 0
-  for kind in KINDS:
-    missing = [n for n in inSource[kind] if (kind, n) not in ignored and not isCovered(kind, n, inNote[kind])]
-    extra = [n for n in inNote[kind] if n not in inSource[kind]]
-    print(f"{kind}：資料に{len(inSource[kind])}個，見出しにない{len(missing)}個")
-    if missing:
-      print(f"  見出しがない：{formatNumbers(kind, missing)}")
-    if extra:
-      print(f"  （参考）見出しにだけある：{formatNumbers(kind, extra)}")
-    missingCount += len(missing)
-  if missingCount:
-    print(f"\n見出しのない番号が{missingCount}個あります．解説を足すか，対象外なら --ignore で外してください")
+  if args.no_headings:
+    print("見出しの検査：省きました（--no-headings）")
   else:
-    print("\n資料の式・図・表は，すべてノートの見出しにあります")
+    for kind in KINDS:
+      missing = [n for n in inSource[kind] if (kind, n) not in ignored and not isCovered(kind, n, inNote[kind])]
+      extra = [n for n in inNote[kind] if n not in inSource[kind]]
+      print(f"{kind}：資料に{len(inSource[kind])}個，見出しにない{len(missing)}個")
+      if missing:
+        print(f"  見出しがない：{formatNumbers(kind, missing)}")
+      if extra:
+        print(f"  （参考）見出しにだけある：{formatNumbers(kind, extra)}")
+      missingCount += len(missing)
+    if missingCount:
+      print(f"\n見出しのない番号が{missingCount}個あります．解説を足すか，対象外なら --ignore で外してください（解説を作らないノートは --no-headings）")
+    else:
+      print("\n資料の式・図・表は，すべてノートの見出しにあります")
   shortage = reportQuestionCounts(args, sourceText, inSource, ignored) if args.qa else 0
   return 1 if missingCount or shortage else 0
 

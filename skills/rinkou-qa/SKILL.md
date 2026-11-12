@@ -117,7 +117,7 @@ description: 書籍輪講・ゼミ発表の準備ノート（Markdown）を作�
    - ノート全体で `$$` の数が偶数．番号で参照している箇所が正しい
    - **問数とレベルの配分が目安に届いている**．足りない式・図と不足数，1割に届かないレベルが出るので，届くまで 2〜5 を繰り返す．
      ```bash
-     python3 -I scripts/check_coverage.py 資料.pdf ノート.md --qa 元データ.txt --min-deep-per-page 5   # 逆質問：1ページ35問，式7問，図8問，各レベル1割，考えて答える質問1ページ5問
+     python3 -I scripts/check_coverage.py 資料.pdf ノート.md --qa 元データ.txt --no-headings --min-deep-per-page 5   # 逆質問（解説の見出しがないので --no-headings）：1ページ35問，式7問，図8問，各レベル1割，考えて答える質問1ページ5問
      python3 -I scripts/check_coverage.py 資料.pdf ノート.md --qa 元データ.txt --min-per-page 50  # 自分の発表原稿
      python3 -I scripts/check_coverage.py 資料.pdf 解説・質問.md --qa 解説・質問.md --min-per-page 15 --min-per-equation 2 --min-per-figure 2 --min-easy-share 0.2 --min-open-share 0.4 --min-deep-per-page 5 --require-intent  # 発表者への質問
      ```

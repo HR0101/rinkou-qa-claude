@@ -16,7 +16,7 @@ tags:
 
 聞いた質問：
 
-来た逆質問：（質問，回答者，答えられたか，型A〜H．型は references/real-questions.md）
+来た逆質問：（質問，回答者，答えられたか，型A〜K．型は references/real-questions.md）
 
 
 ・memo
