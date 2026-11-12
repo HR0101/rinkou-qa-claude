@@ -234,7 +234,8 @@ def splitNoteBlocks(lines):
     starter, inSection = BUILT_QUESTION, (lambda heading: True)
   else:
     starter = NUMBERED_QUESTION
-    inSection = lambda heading: any(word in heading for word in QUESTION_SECTION_WORDS)
+    # 「本日のベスト3質問」等の抜粋・勝負球セクションは全体集計から除外する
+    inSection = lambda heading: any(word in heading for word in QUESTION_SECTION_WORDS) and "ベスト" not in heading
   blocks = []
   section = ""
   level = None
@@ -247,9 +248,10 @@ def splitNoteBlocks(lines):
         level = None
       else:
         match = LEVEL_HEADING.search(line)
-        level = int(match.group(1)) if match and not built and inSection(section) else None
-        if level is not None:
+        if match and not built and inSection(section):
+          level = int(match.group(1))
           scale = FIVE_LEVELS
+        # match しない見出し（節見出し #### 3.1節 など）のときは level を維持する
       current = None
       continue
     if starter.match(line) and inSection(section):

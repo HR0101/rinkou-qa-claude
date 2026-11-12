@@ -408,15 +408,18 @@ def checkLevelCounts(tmp: Path, sourceText: str, fullNote: str, small: tuple[str
     fail("check_coverage.py の --qa が，レベルがそろった元データで失敗している")
   leveled = tmp / "leveled.md"
   leveled.write_text(
-    "## 6. 質問\n\n### 6-1. レベル1（言葉の確認）\n\n1. 【式(1.55)】質問．\n   - → 答え．\n2. 【図1.15】質問．\n"
-    "\n### 6-2. レベル2（読み取り）\n\n3. 【式(1.47a)】質問．\n\n### 6-3. レベル3（理由）\n\n4. 質問．\n"
+    "## 本日のベスト3質問\n\n1. 【式(1.55)】ベスト質問．\n   - → 答え．\n\n"
+    "## 6. 質問\n\n### 6-1. レベル1（言葉の確認）\n\n#### 1.1節 導入\n\n1. 【式(1.55)】質問．\n   - → 答え．\n2. 【図1.15】質問．\n"
+    "\n### 6-2. レベル2（読み取り）\n\n#### 1.1節 導入\n\n3. 【式(1.47a)】質問．\n\n### 6-3. レベル3（理由）\n\n4. 質問．\n"
     "\n### 6-4. レベル4（式・数値・つながり）\n\n5. 質問．\n\n### 6-5. レベル5（発展・誤り）\n\n6. 質問．\n"
     "\n## 7. 表記・文体の指摘\n\n7. 指摘．\n",
     encoding="utf-8",
   )
   result = runCoverageProcess(sourceText, fullNote, tmp, "--qa", str(leveled), *small)
   if result.returncode != 0 or "レベル1 2問" not in result.stdout or "レベルなし 1問" not in result.stdout:
-    fail("check_coverage.py の --qa が，ノートの小見出しからレベルを読めていない")
+    fail("check_coverage.py の --qa が，ノートの小見出しからレベルを読めていない（節見出しの挟み込み対応）")
+  if "全7問" not in result.stdout:
+    fail("check_coverage.py の --qa が，ベスト3セクションを除外して質問を数えていない")
   if runCoverage(sourceText, fullNote, tmp, "--qa", str(leveled), *small, "--min-easy-share", "0.9") != 1:
     fail("check_coverage.py の --min-easy-share が，易しい質問の不足を見つけていない")
   checkAnswerKinds(tmp, sourceText, fullNote, small)
