@@ -23,6 +23,9 @@
 - check_coverage.py の --sentences が，実際に聞かれやすい型（命名，仮定，評価語，列挙）の文に印を付けること
 - check_coverage.py の --min-deep-per-page が，考えて答える質問（〔組み合わせ〕などの印）の不足を見つけること
 - check_coverage.py の --require-intent が，「意図：」「言い換え：」の行が欠けた質問を見つけること
+- check_coverage.py の --no-headings が見出しの検査を省くこと，小見出し（####）の「レベル2」などの語でレベルが
+  変わらないこと，キーワードタグの式番号・図番号が式・図ごとの問数に数えられないこと
+- 本体と軽量版の共通ファイル（スクリプト，ひな形，参考資料）が同じ内容であること
 - check_coverage.py の --quality が，重複の候補と二つ以上聞いている質問を見つけ，終了コードを変えないこと
 - スキル内のすべての Markdown から張った相対リンクの先が実在すること
 
@@ -224,6 +227,7 @@ def runBuild(*args: str) -> subprocess.CompletedProcess:
 def checkExamples() -> None:
   """同梱の実例とひな形から，元データの全問が節に組み立てられることを確認する．"""
   examples = sorted(EXAMPLES_DIR.glob("*.txt")) + sorted(TEMPLATES_DIR.glob("*_source.txt"))
+  examples += sorted((ROOT / "skills" / "rinkou-qa-light" / "templates").glob("*_source.txt"))
   if not examples:
     warn("examples/ に元データの実例がない")
   for example in examples:
@@ -422,6 +426,27 @@ def checkLevelCounts(tmp: Path, sourceText: str, fullNote: str, small: tuple[str
     fail("check_coverage.py の --qa が，ベスト3セクションを除外して質問を数えていない")
   if runCoverage(sourceText, fullNote, tmp, "--qa", str(leveled), *small, "--min-easy-share", "0.9") != 1:
     fail("check_coverage.py の --min-easy-share が，易しい質問の不足を見つけていない")
+  if runCoverage(sourceText, "見出しなし\n", tmp, "--qa", str(leveled), *small) != 1:
+    fail("check_coverage.py が，式・図の見出しがないノートを見つけていない")
+  if runCoverage(sourceText, "見出しなし\n", tmp, "--no-headings", "--qa", str(leveled), *small) != 0:
+    fail("check_coverage.py の --no-headings が，式・図の見出しの検査を省いていない")
+  subHeading = tmp / "sub_heading.md"
+  subHeading.write_text(
+    "## 6. 質問\n\n### 6-1. レベル1（言葉の確認）\n\n#### 2.3 量子化レベル2の場合\n\n1. 【式(1.55)】質問．\n   - → 答え．\n"
+    "\n### 6-2. レベル2（読み取り）\n\n2. 【図1.15】質問．\n",
+    encoding="utf-8",
+  )
+  result = runCoverageProcess(sourceText, fullNote, tmp, "--qa", str(subHeading), *small)
+  if "レベル1 1問，レベル2 1問" not in result.stdout:
+    fail("check_coverage.py が，小見出し（####）に含まれる「レベル2」などの語で質問のレベルを書き換えている")
+  tagged = tmp / "tagged.md"
+  tagged.write_text(
+    "## 6. 質問\n\n1. 【p.1】〔キーワード: 式(1.55), 図1.15, 式(1.47a)〕質問．\n   - → 答え．\n"
+    "2. 【p.1】〔キーワード: 式(1.55), 図1.15, 式(1.47a)〕質問．\n   - → 答え．\n",
+    encoding="utf-8",
+  )
+  if runCoverage(sourceText, fullNote, tmp, "--no-headings", "--qa", str(tagged), *small) != 1:
+    fail("check_coverage.py が，キーワードタグに書いた式番号・図番号を，式・図ごとの問数に数えている")
   checkAnswerKinds(tmp, sourceText, fullNote, small)
 
 
@@ -478,6 +503,34 @@ def checkAnswerKinds(tmp: Path, sourceText: str, fullNote: str, small: tuple[str
     fail("check_coverage.py の --quality が，重複の候補や二つ以上聞いている質問を見つけていない")
 
 
+# 本体と軽量版で同じ内容にしておくファイル（軽量版の参考資料は，リンク先のファイル名だけ違う）．
+# 回のメモと逆質問のひな形は，軽量版が解説・質問ファイルを作らないので，別の内容にしてある
+SHARED_FILES = (
+  "scripts/build_qa.py", "scripts/check_coverage.py", "references/source-format.md",
+  "references/checklist.md", "references/real-questions.md",
+  "examples/Kadai20261013_source.txt",
+)
+SHARED_LINK_NAMES = (("peer-notes.md", "peer-questions.md"),)
+
+
+def checkSharedFiles() -> None:
+  """本体（rinkou-qa）と軽量版（rinkou-qa-light）の共通ファイルが，同じ内容であることを確認する．"""
+  full = ROOT / "skills" / "rinkou-qa"
+  light = ROOT / "skills" / "rinkou-qa-light"
+  if not light.is_dir():
+    return
+  for name in SHARED_FILES:
+    fullPath, lightPath = full / name, light / name
+    if not fullPath.exists() or not lightPath.exists():
+      fail(f"共通ファイル {name} が本体か軽量版にない")
+      continue
+    fullText = fullPath.read_text(encoding="utf-8")
+    for before, after in SHARED_LINK_NAMES:
+      fullText = fullText.replace(before, after)
+    if fullText != lightPath.read_text(encoding="utf-8"):
+      fail(f"共通ファイル {name} の内容が，本体と軽量版で食い違っている（どちらかを直して同じにする）")
+
+
 def main() -> int:
   """すべての検証を実行し，結果を表示する．"""
   pluginName = checkPluginManifest()
@@ -486,6 +539,7 @@ def main() -> int:
   checkScripts()
   checkBuildScript()
   checkCoverageScript()
+  checkSharedFiles()
 
   for message in warnings:
     print(f"警告: {message}")
