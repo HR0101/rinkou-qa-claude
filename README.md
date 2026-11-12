@@ -31,6 +31,8 @@
 このリポジトリには，原著の本文・図・翻訳や，発表資料そのものは含まれていません．
 `skills/rinkou-qa/examples/` には，作者が書いた想定質問の元データの実例（原著の式番号・図番号への言及を含む）だけが入っています．
 
+重い式の解説・図の解説・用語解説を省略し，発表者への質問と逆質問の作成だけに特化した軽量版 **`rinkou-qa-light`** も `skills/rinkou-qa-light` に同梱しています．
+
 輪講資料（LaTeX）そのものを作るスキルは [rinkou-handout-builder-claude](https://github.com/HR0101/rinkou-handout-builder-claude) にあります．
 
 ## インストール
